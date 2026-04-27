@@ -11,3 +11,4 @@ Required files
  - blue_sky_monthly_2000-2009.tif
  - taxaNames_classified.csv
  - HadGEM3-GA7.1_TOA_kernal_L19.nc (not included as its too big, please check the google drive for it at this link https://drive.google.com/file/d/1677LQqx0wMIMhSWzVcFYuPl2HgM9AJ4i/view?usp=drive_link )
+ - pbs_ll.RDS
