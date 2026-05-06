@@ -2,24 +2,22 @@ library(ggplot2)
 library(terra)
 library(tidyterra)
 library(dplyr)
+library(mgcv)
+library(raster)
+library(ncdf4)
+library(RColorBrewer)
 
 #============================================================================
 #cleans the data and loads in the new stuff
 #===================================================================
-loadData <- function(){
+rm(list = ls())
 
-  rm(list = ls())
+pollenLong = readRDS("Data/pollenLong.rds")
+pollenLongExtra = readRDS("Data/pollenLongExtra.rds")
+pollenWide = readRDS("Data/pollenWide.rds")
+pollenWideExtra = readRDS("Data/pollenWideExtra.rds")
 
-  pollenLong = readRDS("Data/pollenLong.rds")
-  pollenLongExtra = readRDS("Data/pollenLongExtra.rds")
-  pollenWide = readRDS("Data/pollenWide.rds")
-  pollenWideExtra = readRDS("Data/pollenWideExtra.rds")
-
-  pbs_ll <- readRDS("pbs_ll.RDS")
-  
-  tif = rast("blue_sky_monthly_2000-2009.tif") #albedo
-  
-}
+tif = rast("blue_sky_monthly_2000-2009.tif") #albedo
 
 #plot(tif)
 
@@ -47,7 +45,7 @@ for (i  in 1:12){
   bs_df_point[,i] = terra::extract(tif[[month]], latlong, ID = FALSE)
 }
 
-sub100 = subset(pollenWide, age_bin == "0")
+sub100 = subset(pollenWide, age_bin == "50")
 
 sub100 = group_by(sub100, siteid)
 
@@ -68,7 +66,7 @@ modern_albedo = inner_join(sub100, bs_df_point, by = c('lat','long'))
 # run the moddels to fit albedo to the data
 #===============================================================================
 modelAlbedo <- function(modern_albedo,modNum){
-library(mgcv)
+
 
   if (modNum == 1){
 mod1 = mgcv::bam(mar ~ s(lat, long, bs="gp", k=10) + s(ol, k=10),
@@ -132,16 +130,23 @@ saveRDS(mod6,"models/mod6.rds")
   #return(mod+modNum)
 }
 
-mod6 = modelAlbedo(modern_albedo, 6)
+mod6 = mgcv::bam(mar ~ s(lat, long, bs="gp", k=350) + s(ol, sg, eg, k=500),
+                 data=modern_albedo, 
+                 family=betar(link="logit"), 
+                 method="REML", 
+                 na.action=na.omit)
+gam.check(mod6)
+saveRDS(mod6,"models/mod6.rds")
 
-cal_interp_model = readRDS(paste0('models/mod6.rds'))
+cal_interp_model = readRDS(paste0('models/mod350-500.rds'))
 foo = predict.gam(cal_interp_model, 
             newdata = modern_albedo , 
             type    = 'response')
 
 #sanity check look further into 1:1 of the model and modern albedo
-ggplot() + geom_point(aes(x = modern_albedo$mar, y = foo)) +
-  geom_abline(show.legend = TRUE)
+#ggplot() + geom_point(aes(x = modern_albedo$mar, y = foo)) +
+#  geom_smooth(aes(x = modern_albedo$mar, y = foo, linetype = "Fitted Line"), method = "lm", color = "black",se = TRUE,show.legend = TRUE) +
+#  scale_linetype_manual(name = "", values = c("Fitted Line" = "dashed"))
 
 
 #predict
@@ -153,13 +158,13 @@ paleo_interp_predict_gam_vec = predict.gam(cal_interp_model,
                                            type    = 'response')
 paleo_interp_predict_gam = data.frame(pollenWideExtra,
                                     alb_mean = paleo_interp_predict_gam_vec)
-saveRDS(paleo_interp_predict_gam, "models/predictMar.rds")
-write.csv(paleo_interp_predict_gam, "models/predictMar.csv")
+#saveRDS(paleo_interp_predict_gam, "models/predictMar.rds")
+#write.csv(paleo_interp_predict_gam, "models/predictMar.csv")
 
 
 
 #take differences of albedo mean at each age bin change
-albedo_bin_diff <- function(df, ordered_bins = c("0", "5", "10", "15", "20", "25")) {
+albedo_bin_diff <- function(df) { #, ordered_bins = c("0", "5", "10", "15", "20", "25")
   # --- Compute consecutive differences per site --------------
   result <- df %>%
     dplyr::select(siteid, lat, long, age_bin, alb_mean,) %>%
@@ -170,7 +175,7 @@ albedo_bin_diff <- function(df, ordered_bins = c("0", "5", "10", "15", "20", "25
       alb_from = dplyr::lag(alb_mean),
       to_bin   = age_bin,
       alb_to   = alb_mean,
-      alb_diff = alb_to - alb_from        # NA if either side is NA
+      alb_diff  = alb_from - alb_to        # NA if either side is NA
     ) %>%
     ungroup() %>%
     filter(!is.na(from_bin)) %>%
@@ -189,8 +194,6 @@ albedoDiffs$lat180 = albedoDiffs$lat + 90
 # create spatial object of unique coordingates
 ll_proj = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"
 
-library(raster)
-library(ncdf4)
 
 alb_diff_spatial = SpatialPointsDataFrame(coords = albedoDiffs[,c('long360', 'lat')], 
                                           data = albedoDiffs, 
@@ -207,61 +210,68 @@ albedoDiffs$rk_hadgem = rk_hadgem_month
 albedoDiffs$rf = albedoDiffs$alb_diff * albedoDiffs$rk_hadgem * 100
 
 
-ggplot(albedoDiffs) +geom_boxplot(aes(x=from_bin, y =rf)) 
-ggplot(albedoDiffs) +geom_point(aes(x=long,y=lat,color = rf))+facet_wrap(~from_bin) + scale_colour_distiller(type = "div", palette = "PuOr",na.value = NA)
-ggplot(pollenWideExtra) + geom_point(aes(x=long,y=lat,color = ol))+facet_wrap(~age_bin)
-ggplot(paleo_interp_predict_gam) + geom_point(aes(x=long,y=lat,color = alb_mean))+facet_wrap(~age_bin)
-
-
-
-#find why there is missing values in albedoDiffs
-
-# create spatial object of unique coordingates
-
-ggplot(foo) +geom_boxplot(aes(x=from_bin, y =rf )) 
-ggplot(foo) +geom_point(aes(x=long,y=lat,color = rf))+facet_wrap(~from_bin) + scale_colour_distiller(type = "div", palette = "PuOr")
-ggplot(pollenWide) + geom_point(aes(x=long,y=lat,color = ol))+facet_wrap(~age_bin)
-
-
-#sanity check look further into 1:1 of the model and modern albedo
-#maps of calibration
-#map of landcover
-#maps of albedo, albedo difs
-#map of rf, specific time intervals
-#rf, rf kernal
-#
-
-library(ebirdst)
-
-assign_to_grid(albedoDiffs, coords = c("lat", "long"), is_lonlat = TRUE, res = c(200000, 140000))
-library(terra)
-library(tidyterra)
-library(ggplot2)
 #remotes::install_github("dieghernan/tidyterra")
 
-test = subset(albedoDiffs, subset = !is.na(rf))
+temp = subset(albedoDiffs, subset = !is.na(rf))
 
 # Create spatial points (vect)
-v <- vect(test, geom=c("long", "lat"), crs="+proj=longlat +datum=WGS84")
-
+v <- vect(temp, geom=c("long", "lat"), crs="+proj=longlat +datum=WGS84")
+rm(temp)
 
 # Rasterize
-r <- rast(v, res=1) # sets resolution to 1 degree
-r <- rasterize(v, r, field="rf", fun = mean, by = 'from_bin')
-image(r)
-ggplot() + tidyterra::geom_spatraster(data = r) +facet_wrap(~lyr) + scale_fill_distiller(type = "div", palette = "PuOr", values=c(0,0.2, 0.8,1))
+r <- rast(v, res=2) # sets resolution to 1 degree
+r <- rasterize(v, r, field="rf", fun = median, by = 'from_bin')
 
-#work on map this map ^^^^
-#summarize boxplot on spatraster?
-#other visuals, land cover moving througb time
-#push code to github
-#continue working on presentation
+#ggplot() + tidyterra::geom_spatraster(data = r, color = clarity) +facet_wrap(~lyr) + scale_fill_distiller(type = "div", palette = "PuOr", values=c(0,0.2, 0.8,1))
 
-#simulate
-print(">>Simulate")
-paleo_interp_sim_gam = simulate(cal_interp_model,
-                                nsim = 100,
-                                data = albedoDiffs)
+layer_means <- global(r, median, na.rm = TRUE)
+layer_means$time = row.names(layer_means)
+layer_means$time = factor(layer_means$time, levels = layer_means$time)
 
-paleo_interp_sim_gam_df = data.frame(pollen_by_group_wide,  
-                                     paleo_interp_sim_gam)
+
+
+
+
+
+
+
+
+
+
+#250, 300
+#250, 500
+#saveRDS(mod6,"models/mod350-500.rds") #350, 500
+#saveRDS(mod6,"models/mod500-500.rds") #500, 500
+
+#mod6 = mgcv::bam(mar ~ s(lat, long, bs="gp", k=500) + s(ol, sg, eg, k=500), # add elevation
+#                 data=modern_albedo, 
+#                 family=betar(link="logit"), 
+#                 method="REML", 
+#                 na.action=na.omit)
+#gam.check(mod6)
+#saveRDS(mod6,"models/mod6.rds")
+
+#cal_interp_model = readRDS(paste0('models/mod350-500.rds'))
+#testt = predict.gam(cal_interp_model, 
+#                  newdata = modern_albedo , 
+#                  type    = 'response')
+
+#sanity check look further into 1:1 of the model and modern albedo
+#ggplot() + geom_point(aes(x = modern_albedo$mar, y = testt)) +
+#  geom_smooth(aes(x = modern_albedo$mar, y = foo, linetype = "Fitted Line"), method = "lm", color = "black",se = TRUE,show.legend = TRUE) +
+#  scale_linetype_manual(name = "", values = c("Fitted Line" = "dashed"))
+
+
+
+
+
+
+
+ #simulate
+#print(">>Simulate")
+#paleo_interp_sim_gam = simulate(cal_interp_model,
+#                                nsim = 100,
+#                                data = albedoDiffs)
+
+#paleo_interp_sim_gam_df = data.frame(pollen_by_group_wide,  
+#                                     paleo_interp_sim_gam)

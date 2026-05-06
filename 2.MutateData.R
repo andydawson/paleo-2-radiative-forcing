@@ -6,7 +6,8 @@
 library(dplyr)
 library(tidyr)
 library(stringr)
-north_america_pollen <- readRDS("north_america_pollen.rds")
+rm()
+north_america_pollen <- readRDS("data/north_america_pollen.rds")
 
 # ====================================================================
 # STEP 1: Load and clean the translation table=
@@ -61,6 +62,8 @@ pollen_long <- north_america_pollen %>%
   # Drop zero / NA counts
   filter(!is.na(count) & count > 0)
 
+rm(north_america_pollen)
+
 message("Pollen long table: ", nrow(pollen_long), " rows after filtering")
 
 
@@ -69,22 +72,10 @@ message("Pollen long table: ", nrow(pollen_long), " rows after filtering")
 # Breaks: -100, 0, 5000, 10000, 15000, 20000, 25000=
 # =============================================================================
 #labels_period = c('0.05 - 0.5 ka', '0.5 - 2 ka', '2 - 4 ka', '4 - 6 ka', '6 - 8 ka', '8 - 10 ka', '10 - 12 ka')
-
-age_breaks <- c(-100, 50, 500, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000, 20000)
-age_labels <- c(
-  "0",   # -100–0 BP
-  "50",    # 0–5,000 BP
-  "500",   # 5,000–10,000 BP
-  "2000",  # 10,000–15,000 BP
-  "4000",  # 15,000–20,000 BP
-  "8000",
-  "10000",
-  "12000",
-  "14000",
-  "16000",
-  "18000",
-  "20000"# 20,000–25,000 BP
-)
+#breaks_LGM = c(-74, 0.1, 0.35, 0.7, seq(1.5, 21.5, by=1))
+age_breaks <- c(-74, 100, 1000, 3000, 5000,7000, 9000,11000,13000, 15000, 17000, 19000, 21000)
+age_labels <- c("50","500","2000","4000","6000","8000","10000","12000","14000","16000","18000", "20000") 
+#c(-100, 50, 500, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000, 20000)
 
 pollen_long <- pollen_long %>%
   mutate(
@@ -105,7 +96,7 @@ pollen_long <- pollen_long %>%
 
 pollen_pct <- pollen_long %>%
 group_by(siteid, depth, age, age_bin, lat, long) %>%
-  mutate(
+  dplyr::mutate(
     sample_total = sum(count, na.rm = TRUE),
     pct= (count / sample_total)
   ) %>%
